@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # MoshiRAG Start All Services
+# Exact commands from working RTX 5090 deployment
 # Order: Conditioner → Ollama → MoshiRAG Main
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,38 +20,24 @@ VENV_DIR="/root/moshi-venv"
 LOGS_DIR="/root/moshi-logs"
 mkdir -p "$LOGS_DIR"
 
-# PID file tracking
 PIDFILE="/tmp/moshi-deploy.pids"
 touch "$PIDFILE"
 
-kill_pid() {
-    local name=$1
-    if grep -q "^${name}=" "$PIDFILE" 2>/dev/null; then
-        local pid=$(grep "^${name}=" "$PIDFILE" | cut -d= -f2)
-        if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-            echo "  Stopped $name (PID $pid)"
-        fi
-        sed -i "/^${name}=/d" "$PIDFILE"
-    fi
-}
-
 save_pid() {
-    local name=$1
-    local pid=$2
-    echo "${name}=${pid}" >> "$PIDFILE"
+    echo "${1}=${2}" >> "$PIDFILE"
 }
 
 wait_for_port() {
     local port=$1
     local name=$2
-    local max_wait=60
-    local count=0
+    local max=120
+    local i=0
     while ! curl -s "http://localhost:${port}" >/dev/null 2>&1; do
         sleep 1
-        count=$((count + 1))
-        if [ $count -ge $max_wait ]; then
-            echo "[!] $name failed to start on port $port after ${max_wait}s"
+        i=$((i + 1))
+        if [ $i -ge $max ]; then
+            echo "[!] $name failed to start on port $port after ${max}s"
+            echo "    Check logs: $LOGS_DIR/"
             return 1
         fi
     done
@@ -61,11 +48,12 @@ echo "========================================="
 echo "  Starting MoshiRAG Services"
 echo "========================================="
 
-# 1. Conditioner (CPU-only, saves VRAM)
-echo "[1/3] Starting Conditioner on port $CONDITIONER_PORT..."
-kill_pid "conditioner"
+# 1. Conditioner (CPU-only)
+echo "[1/3] Starting Conditioner (CPU, port $CONDITIONER_PORT)..."
 cd "$SCRIPT_DIR"
-HF_TOKEN="$HF_TOKEN" CUDA_VISIBLE_DEVICES='' "$VENV_DIR/bin/python3" \
+CUDA_VISIBLE_DEVICES='' \
+HF_TOKEN="$HF_TOKEN" \
+"$VENV_DIR/bin/python3" \
     -m moshi.server_conditioner \
     --config "$MODEL_DIR/config.json" \
     --moshi-weight "$MODEL_DIR/model.safetensors" \
@@ -79,18 +67,21 @@ echo "  PID: $!"
 wait_for_port "$CONDITIONER_PORT" "Conditioner"
 
 # 2. Ollama (CPU, zero-cost LLM backend)
-echo "[2/3] Starting Ollama on port $OLLAMA_PORT..."
+echo "[2/3] Starting Ollama (port $OLLAMA_PORT)..."
 if ! pgrep -x ollama >/dev/null 2>&1; then
-    CUDA_VISIBLE_DEVICES='' OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 \
-        ollama serve > "$LOGS_DIR/ollama.log" 2>&1 &
+    CUDA_VISIBLE_DEVICES='' \
+    OLLAMA_NUM_PARALLEL=1 \
+    ollama serve > "$LOGS_DIR/ollama.log" 2>&1 &
     save_pid "ollama" $!
-    sleep 3
+    echo "  PID: $!"
+    sleep 5
+else
+    echo "  [✓] Ollama already running"
 fi
-echo "[✓] Ollama running"
+echo "[✓] Ollama ready"
 
-# 3. MoshiRAG Main (GPU, batch-size 1 for 32GB cards)
-echo "[3/3] Starting MoshiRAG Main on port $MOSHI_PORT (GPU, batch-size $BATCH_SIZE)..."
-kill_pid "moshi"
+# 3. MoshiRAG Main (GPU, batch-size 1)
+echo "[3/3] Starting MoshiRAG Main (GPU, batch-size $BATCH_SIZE, port $MOSHI_PORT)..."
 cd "$SCRIPT_DIR"
 REFERENCE_ENCODER_URL="$REFERENCE_ENCODER_URL" \
 HF_TOKEN="$HF_TOKEN" \
@@ -116,11 +107,10 @@ echo "========================================="
 echo "  All Services Running"
 echo "========================================="
 echo ""
-echo "  MoshiRAG:   http://localhost:$MOSHI_PORT"
+echo "  MoshiRAG:    http://localhost:$MOSHI_PORT"
 echo "  Conditioner: http://localhost:$CONDITIONER_PORT"
-echo "  Ollama:     http://localhost:$OLLAMA_PORT"
+echo "  Ollama:      http://localhost:$OLLAMA_PORT"
 echo ""
 echo "  Logs: $LOGS_DIR/"
 echo "  PIDs: $PIDFILE"
-echo ""
-echo "  For public URL: ./tunnel.sh"
+echo "  Public URL: ./tunnel.sh"

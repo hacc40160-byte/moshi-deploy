@@ -2,18 +2,19 @@
 set -euo pipefail
 
 # MoshiRAG One-Time Setup
-# Run this once on a fresh GPU machine
+# Exact replica of working RTX 5090 deployment
+# Run once on a fresh GPU machine
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Load .env if exists, otherwise use .env.template defaults
+# Load .env
 if [ -f .env ]; then
     source .env
 else
     echo "[!] No .env found. Copying from template..."
     cp .env.template .env
-    echo "[!] Edit .env with your HF_TOKEN, then re-run this script."
+    echo "[!] Edit .env with your HF_TOKEN, then re-run."
     exit 1
 fi
 
@@ -28,22 +29,22 @@ echo "========================================="
 echo "  MoshiRAG Setup - Fresh GPU Machine"
 echo "========================================="
 
-# Check for NVIDIA GPU
-echo "[1/7] Checking GPU..."
+# Check GPU
+echo "[1/8] Checking GPU..."
 if ! nvidia-smi &>/dev/null; then
-    echo "[!] No NVIDIA GPU detected. Install drivers first."
+    echo "[!] No NVIDIA GPU detected."
     exit 1
 fi
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 echo "[✓] GPU detected"
 
-# Install system deps
-echo "[2/7] Installing system dependencies..."
+# System deps
+echo "[2/8] Installing system dependencies..."
 apt-get update -qq
-apt-get install -y -qq python3.11 python3.11-venv python3-pip curl wget git
+apt-get install -y -qq python3.11 python3.11-venv python3-pip curl wget git portaudio19-dev
 
-# Create Python 3.11 venv
-echo "[3/7] Creating Python 3.11 venv..."
+# Python 3.11 venv
+echo "[3/8] Creating Python 3.11 venv..."
 VENV_DIR="/root/moshi-venv"
 if [ ! -d "$VENV_DIR" ]; then
     python3.11 -m venv "$VENV_DIR"
@@ -51,26 +52,27 @@ fi
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip setuptools wheel
 
-# Install PyTorch with CUDA
-echo "[4/7] Installing PyTorch (this takes a while)..."
-pip install torch --index-url https://download.pytorch.org/whl/cu128
+# PyTorch with CUDA 12.8
+echo "[4/8] Installing PyTorch (takes a while)..."
+pip install torch==2.9.1+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
-# Install MoshiRAG
-echo "[5/7] Installing MoshiRAG..."
-pip install moshi-rag[server]
-# Also grab conditioner deps
-pip install moshi[conditioner] || true
+# MoshiRAG from source (exact commit that works)
+echo "[5/8] Installing MoshiRAG from source..."
+pip install -e "git+https://github.com/kyutai-labs/moshi-rag.git@8c6dfc101b7871baa428424bcdc583b74fb561d9#egg=moshi&subdirectory=moshi"
 
-# Install Ollama
-echo "[6/7] Installing Ollama..."
+# Remaining deps from frozen requirements
+echo "[6/8] Installing remaining dependencies..."
+pip install -r requirements.txt --no-deps 2>/dev/null || true
+
+# Ollama
+echo "[7/8] Installing Ollama + pulling qwen3:4b..."
 if ! command -v ollama &>/dev/null; then
     curl -fsSL https://ollama.com/install.sh | sh
 fi
-# Pull the LLM model
 ollama pull qwen3:4b
 
-# Download MoshiRAG model
-echo "[7/7] Downloading MoshiRAG model (~15GB)..."
+# Download MoshiRAG model (~15GB)
+echo "[8/8] Downloading MoshiRAG model (~15GB)..."
 export HF_TOKEN="$HF_TOKEN"
 mkdir -p "$MODEL_DIR"
 python3 -c "
@@ -88,4 +90,4 @@ echo "========================================="
 echo "  Setup Complete!"
 echo "========================================="
 echo ""
-echo "Next: ./start.sh"
+echo "  Next: ./start.sh"
