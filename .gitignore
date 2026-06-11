@@ -1,0 +1,16 @@
+# Data (don't commit uploaded files or vector store)
+knowledge-base/data/
+knowledge-base/chromadb/
+knowledge-base/venv/
+
+# Model weights (downloaded by setup.sh)
+/models/
+
+# Logs
+*.log
+
+# Environment (contains HF_TOKEN)
+.env
+
+# Runtime
+*.pids
