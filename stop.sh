@@ -1,36 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
-# MoshiRAG Stop All Services
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PIDFILE="/tmp/moshi-deploy.pids"
+# Stop all MoshiRAG services
 
 echo "========================================="
-echo "  Stopping MoshiRAG Services"
+echo "  Stopping All Services"
 echo "========================================="
 
-# Kill tracked PIDs
-if [ -f "$PIDFILE" ]; then
-    while IFS='=' read -r name pid; do
-        if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-            echo "[✓] Stopped $name (PID $pid)"
-        else
-            echo "[–] $name (PID $pid) already stopped"
-        fi
-    done < "$PIDFILE"
-    rm -f "$PIDFILE"
-fi
+echo "[1/5] Stopping Cloudflare tunnel..."
+pkill -f "cloudflared tunnel" 2>/dev/null && echo "  [✓] stopped" || echo "  [–] not running"
 
-# Also kill any orphaned processes
-pkill -f "moshi.server_conditioner" 2>/dev/null && echo "[✓] Killed orphan conditioner" || true
-pkill -f "moshi.server " 2>/dev/null && echo "[✓] Killed orphan moshi server" || true
-# Don't kill ollama — user might be using it for other things
-# pkill -f "ollama serve" 2>/dev/null
+echo "[2/5] Stopping Nginx..."
+nginx -s stop 2>/dev/null && echo "  [✓] stopped" || echo "  [–] not running"
 
-# Kill cloudflared tunnel
-pkill -f "cloudflared tunnel" 2>/dev/null && echo "[✓] Killed tunnel" || true
+echo "[3/5] Stopping Knowledge Base..."
+pkill -f "knowledge-base/venv.*server.py" 2>/dev/null && echo "  [✓] stopped" || echo "  [–] not running"
 
+echo "[4/5] Stopping MoshiRAG..."
+pkill -f "moshi.server --hf-repo" 2>/dev/null && echo "  [✓] stopped" || echo "  [–] not running"
+
+echo "[5/5] Stopping Conditioner..."
+pkill -f "moshi.server_conditioner" 2>/dev/null && echo "  [✓] stopped" || echo "  [–] not running"
+
+# Ollama stays running (shared resource, lightweight)
 echo ""
-echo "All MoshiRAG services stopped."
+echo "  Ollama left running (shared, lightweight)"
+echo "  To stop: pkill ollama"
+echo ""
+echo "  All services stopped."

@@ -1,56 +1,106 @@
-# MoshiRAG One-Command Deploy
+# MoshiRAG + Knowledge Base — One-Command Deploy
 
-Battle-tested deployment for MoshiRAG on any fresh GPU machine.
+Zero-error deploy for fresh GPU machines. Pull, configure, run.
 
-**Tested on:** RTX 5090 32GB / 60GB disk / 93GB RAM
+## What's Included
 
-## What Gets Deployed
+- **MoshiRAG** — voice AI agent (GPU, port 8999)
+- **Knowledge Base** — document upload + semantic search (CPU, port 8500)
+- **Nginx** — reverse proxy (port 80): `/` → MoshiRAG, `/kb/` → Knowledge Base
+- **Cloudflare Tunnel** — free public URL (auto-generated)
+- **Ollama** — local LLM backend (qwen3:4b + nomic-embed-text)
 
-| Service | Port | Device | Purpose |
-|---------|------|--------|---------|
-| MoshiRAG Main | 8998 | GPU | Audio RAG server |
-| Conditioner | 8001 | CPU | Reference encoder |
-| Ollama | 11434 | CPU | LLM backend (qwen3:4b) |
-
-## Quick Start
+## Quick Start (Fresh GPU)
 
 ```bash
-# 1. SSH into your fresh GPU machine
-ssh -p PORT USER@HOST
+# 1. Clone
+git clone https://github.com/hacc40160-byte/moshi-deploy.git
+cd moshi-deploy
 
-# 2. Clone or upload this repo
-git clone <this-repo> ~/moshi-deploy && cd ~/moshi-deploy
+# 2. Configure
+cp .env.template .env
+nano .env  # Add your HF_TOKEN
 
-# 3. Set your HF token (for gated Llama 3.2 conditioner model)
-export HF_TOKEN="hf_YOUR_TOKEN_HERE"
-
-# 4. Run setup (installs everything, downloads models)
+# 3. Setup (one-time, ~15 min)
+chmod +x setup.sh start.sh stop.sh
 ./setup.sh
 
-# 5. Start all services
+# 4. Start
 ./start.sh
-
-# 6. (Optional) Public URL via Cloudflare tunnel
-./tunnel.sh
 ```
+
+## After Start
+
+```
+  MoshiRAG:       http://localhost:8999
+  Knowledge Base: http://localhost:8500
+  Nginx (local):  http://localhost:80
+  Public URL:     https://xxx.trycloudflare.com
+
+  https://xxx.trycloudflare.com/       → MoshiRAG
+  https://xxx.trycloudflare.com/kb/    → Knowledge Base UI
+```
+
+## Knowledge Base Features
+
+- 📁 Upload files (PDF, txt, md, csv, json)
+- 🌐 Paste any URL → auto-scrapes and learns
+- ✏️ Paste raw text directly
+- 🔍 Semantic search with multi-granularity chunks
+- 🗑️ Clear all data
+- OpenAI-compatible endpoint at `/v1/chat/completions`
+
+## Commands
+
+| Command | What it does |
+|---------|-------------|
+| `./start.sh` | Start all services + tunnel |
+| `./stop.sh` | Stop all services |
+| `./status.sh` | Check what's running |
+| `./restart.sh` | Stop + Start |
+
+## Architecture
+
+```
+User Browser
+    │
+    ▼
+Cloudflare Tunnel (free public URL)
+    │
+    ▼
+Nginx (:80)
+    ├── /      → MoshiRAG (:8999, GPU)
+    └── /kb/   → Knowledge Base (:8500, CPU)
+                      │
+                      ▼
+                 Ollama (:11434)
+                 ├── qwen3:4b (LLM)
+                 └── nomic-embed-text (embeddings)
+```
+
+## Requirements
+
+- NVIDIA GPU (24GB+ VRAM recommended)
+- Python 3.11
+- ~30GB disk (model + deps)
+- HuggingFace token
 
 ## Files
 
 ```
-setup.sh       - One-time install: deps, models, venv, Ollama
-start.sh       - Start all 3 services (conditioner → ollama → moshi)
-stop.sh        - Graceful stop all services
-restart.sh     - Stop + Start
-tunnel.sh      - Cloudflare quick tunnel for public access
-status.sh      - Health check all services
-.env.template  - Environment variables (copy to .env)
+moshi-deploy/
+├── .env.template        # Config template
+├── setup.sh             # One-time install
+├── start.sh             # Start all services
+├── stop.sh              # Stop all services
+├── status.sh            # Check status
+├── restart.sh           # Restart all
+├── nginx.conf           # Reverse proxy config
+├── requirements.txt     # Python deps (MoshiRAG)
+├── knowledge-base/
+│   ├── server.py        # Knowledge Base FastAPI server
+│   ├── venv/            # (created by setup.sh)
+│   ├── chromadb/        # Vector store
+│   └── data/            # Uploaded files
+└── README.md
 ```
-
-## Key Discoveries (Battle-Tested)
-
-- **batch-size 1** is required on 32GB cards — default causes CUDA OOM
-- **Conditioner on CPU** — frees ~2GB VRAM for the main model
-- **torch 2.9.1+cu128** works with RTX 5090
-- **Python 3.11** required — 3.10 lacks asyncio.TaskGroup
-- **HF classic token** required — Llama 3.2 is a gated model
-- **Cloudflare quick tunnel** for free public URL (no account needed)
